@@ -79,10 +79,15 @@ type Field struct {
 	Type    string
 }
 
+type Service struct {
+	Name    string
+	Methods []*Method
+}
+
 type Vars struct {
 	Name     string
 	Package  string
-	Methods  []*Method
+	Services []*Service
 	Messages []*Message
 }
 
@@ -122,7 +127,12 @@ func main() {
 		}
 		code := bytes.NewBuffer(nil)
 
-		messages = []*Message{}
+		vars := &Vars{
+			Name:    f.GetName(),
+			Package: f.GetPackage(),
+		}
+
+		messages := []*Message{}
 		for _, msg := range f.MessageType {
 			m := &Message{
 				Name:   *msg.Name,
@@ -154,9 +164,12 @@ func main() {
 				Name:    svc.GetName(),
 				Methods: methods,
 			}
+			services = append(services, service)
 		}
 
-		tmpl.Execute(code, f)
+		vars.Services = services
+
+		tmpl.Execute(code, vars)
 
 		name := f.GetName()
 		ext := filepath.Ext(name)
