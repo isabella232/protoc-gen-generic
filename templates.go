@@ -4,17 +4,6 @@ import (
 	"text/template"
 )
 
-type Message struct {
-	Name   string
-	Fields []*Field
-}
-
-type Field struct {
-	Comment string
-	Name    string
-	Type    string
-}
-
 var fileTemplate = template.Must(template.New("header").Parse(`
 // @flow
 

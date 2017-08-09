@@ -2,34 +2,127 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
 )
 
-func main() {
-	data, err := ioutil.ReadAll(os.Stdin)
+// Copied from https://github.com/grpc-ecosystem/grpc-gateway/blob/master/protoc-gen-grpc-gateway/main.go
+// BSD-3 licensed
+func parseReq(r io.Reader) (*plugin.CodeGeneratorRequest, error) {
+	log.Println("Parsing code generator request")
+	input, err := ioutil.ReadAll(r)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Failed to read code generator request: %v", err)
+		return nil, err
 	}
+	req := new(plugin.CodeGeneratorRequest)
+	if err = proto.Unmarshal(input, req); err != nil {
+		log.Printf("Failed to unmarshal code generator request: %v", err)
+		return nil, err
+	}
+	log.Println("Parsed code generator request")
+	return req, nil
+}
 
-	var req plugin.CodeGeneratorRequest
-	if err := proto.Unmarshal(data, &req); err != nil {
+func parseParameters(req *plugin.CodeGeneratorRequest) {
+	if req.Parameter != nil {
+		for _, p := range strings.Split(req.GetParameter(), ",") {
+			spec := strings.SplitN(p, "=", 2)
+			if len(spec) == 1 {
+				if err := flag.CommandLine.Set(spec[0], ""); err != nil {
+					log.Fatalf("Cannot set flag %s", p)
+				}
+				continue
+			}
+			name, value := spec[0], spec[1]
+			if err := flag.CommandLine.Set(name, value); err != nil {
+				log.Fatalf("Cannot set flag %s", p)
+			}
+		}
+	}
+}
+
+func fileFromReq(req *plugin.CodeGeneratorRequest, name string) (*descriptor.FileDescriptorProto, error) {
+	for _, f := range req.ProtoFile {
+		if f.GetName() == name {
+			return f, nil
+		}
+	}
+	return nil, fmt.Errorf("couldn't find file to generate: %s", name)
+}
+
+type Method struct {
+	Name   string
+	Input  string
+	Output string
+}
+
+type Message struct {
+	Name   string
+	Fields []*Field
+}
+
+type Field struct {
+	Comment string
+	Name    string
+	Type    string
+}
+
+type Vars struct {
+	Name     string
+	Package  string
+	Methods  []*Method
+	Messages []*Message
+}
+
+var (
+	templatePath = flag.String("template_path", "", "path to template file")
+	fileExt      = flag.String("file_ext", "", "file extension for new files")
+)
+
+func main() {
+	// I think we just need this to get the flag internals set up
+	flag.Parse()
+
+	// Parse the input
+	req, err := parseReq(os.Stdin)
+	if err != nil {
 		log.Fatalf("unable to parse protobuf: %v", err)
 	}
 
-	var files []*plugin.CodeGeneratorResponse_File
-	for _, f := range req.ProtoFile[3:] {
-		code := bytes.NewBuffer(nil)
-		fileTemplate.Execute(code, f)
+	// Parse the parameters into flags
+	parseParameters(req)
 
+	// Load the template
+	tmpl, err := template.ParseFiles(*templatePath)
+	if err != nil {
+		log.Fatalf("unable to parse template: %v", err)
+	}
+
+	var files []*plugin.CodeGeneratorResponse_File
+
+	log.Printf("FileToGenerate %v", req.GetFileToGenerate())
+	// TODO(termie): support multiple files
+
+	for _, name := range req.GetFileToGenerate() {
+		f, err := fileFromReq(req, name)
+		if err != nil {
+			log.Fatalf("couldn't find file: %v", err)
+		}
+		code := bytes.NewBuffer(nil)
+
+		messages = []*Message{}
 		for _, msg := range f.MessageType {
 			m := &Message{
 				Name:   *msg.Name,
@@ -43,13 +136,32 @@ func main() {
 				})
 			}
 
-			messageTemplate.Execute(code, m)
+			messages = append(messages, m)
 		}
+
+		services := []*Service{}
+		for _, svc := range f.Service {
+			methods := []*Method{}
+			for _, mth := range svc.Method {
+				method := &Method{
+					Name:   mth.GetName(),
+					Input:  mth.GetInputType(),
+					Output: mth.GetOutputType(),
+				}
+				methods = append(methods, method)
+			}
+			service := &Service{
+				Name:    svc.GetName(),
+				Methods: methods,
+			}
+		}
+
+		tmpl.Execute(code, f)
 
 		name := f.GetName()
 		ext := filepath.Ext(name)
 		base := strings.TrimSuffix(name, ext)
-		output := fmt.Sprintf("%s.flow.js", base)
+		output := fmt.Sprintf("%s.%s", base, *fileExt)
 
 		files = append(files, &plugin.CodeGeneratorResponse_File{
 			Name:    proto.String(output),
