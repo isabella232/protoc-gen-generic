@@ -148,6 +148,7 @@ func main() {
 
 			messages = append(messages, m)
 		}
+		vars.Messages = messages
 
 		services := []*Service{}
 		for _, svc := range f.Service {
