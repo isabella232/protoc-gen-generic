@@ -1,3 +1,17 @@
+//   Copyright 2017 Wercker Holding BV
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 package main
 
 import (
@@ -110,10 +124,16 @@ func main() {
 	parseParameters(req)
 
 	// Load the template
-	tmpl, err := template.ParseFiles(*templatePath)
+	fbytes, err := ioutil.ReadFile(*templatePath)
+	if err != nil {
+		log.Fatalf("unable to read template: %v", err)
+	}
+
+	tmpl, err := template.New("foo").Funcs(Funcs).Parse(string(fbytes))
 	if err != nil {
 		log.Fatalf("unable to parse template: %v", err)
 	}
+	// tmpl = tmpl.Templates()[0]
 
 	var files []*plugin.CodeGeneratorResponse_File
 
@@ -239,4 +259,14 @@ func getFieldType(field *descriptor.FieldDescriptorProto, pkg string) string {
 	}
 
 	return ret
+}
+
+var Funcs template.FuncMap = template.FuncMap{
+	// "package": func(input string) string { return strings.ToLower(input) },
+	// "method":  func(input string) string { return strings.Title(input) },
+	// "class":   func(input string) string { return strings.Title(input) },
+	// "file":    func(input string) string { return strings.ToLower(input) },
+	// "title":     studly,
+	// "packaging": packaging,
+	"lower": func(input string) string { return strings.ToLower(input) },
 }

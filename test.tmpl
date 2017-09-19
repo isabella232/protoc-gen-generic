@@ -1,5 +1,7 @@
 {{.Name}}
 
+{{lower "UPPER"}}
+
 {{range .Messages}}
   struct {{.Name}} = {
   {{- range $field := .Fields}}
